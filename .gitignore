@@ -150,6 +150,9 @@ analysis/
 # folder with plots
 plots/
 
+# folder with the shake-up notebooks
+shake_ups
+
 # folders with the papers, thesis etc
 master_thesis_results/
 radon_xenon_paper/

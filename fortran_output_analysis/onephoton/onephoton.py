@@ -10,7 +10,7 @@ from fortran_output_analysis.common_utility import (
 )
 
 from fortran_output_analysis.constants_and_parameters import g_eV_per_Hartree
-from fortran_output_analysis.types import ArrFloat64, ArrFloat64_2D
+from fortran_output_analysis.custom_types import ArrFloat64, ArrFloat64_2D
 
 """
 NOTE: The names of some classes below are not perfect and could be changed for 
@@ -201,26 +201,26 @@ class Channels:
 
     def get_l_to_index(self, out_as: str = "str") -> dict[int | str, int]:
         """
+        Maps final orbital momenta with the corresponding row indices in the data arrays.
+
         Args:
-            out_as - whether to output orbital momenta in the form of int or str.
+            out_as - whether to output final orbital momenta in the form of int or str.
 
         Returns:
-            a dictionary mapping reachable orbital momenta with the row indices in the data.
+            a dictionary mapping reachable final momenta with the row indices in the data.
         """
 
         assert_out_as(out_as)
 
         l_to_index = {}
 
-        final_l_reachable = final_ls(self.hole.l, only_reachable=True)
+        # get the list of all ionisation channels (paths)
+        ion_channel_list = self.get_all_ionisation_channels()
 
-        for final_l in final_l_reachable:
-            ion_channel = self.get_ionisation_channel(final_l)
-
+        for ion_channel in ion_channel_list:
+            l_key = ion_channel.l  # int
             if out_as == "str":  # turn the dictionary key into the out_as format
-                l_key = l_to_str(final_l)
-            else:
-                l_key = final_l
+                l_key = l_to_str(l_key)
 
             l_to_index[l_key] = ion_channel.row_index
 
@@ -443,8 +443,9 @@ class OnePhoton:
 
             bp_index - the breakpoint index, starting with 1.
             should_reload - in case the data was previously loaded, tells if it should be reloaded.
-            binding_energy - binding energy for the hole. Allows specifying the predifined value for
-            the hole's binding energy instead of loading it from the simulation data.
+            binding_energy - binding energy for the hole in Hartree. Allows specifying the
+                             predifined value for the hole's binding energy instead of loading it
+                             from the simulation data.
             path_to_energies - path to the energies.dat file with the binding energies.
         """
         is_loaded = self.is_hole_loaded(n_qn, hole_l)
@@ -498,7 +499,7 @@ class OnePhoton:
             # store the hole's information and load data for ionisation channels
             self._channels[(n_qn, hole_l)] = Channels(hole, data_files, bp_index)
 
-    def assert_hole_load(self, n_qn: int, hole_l: int | str):
+    def assert_hole_load(self, n_qn: int, hole_l: int | str) -> None:
         """
         Asserts that the hole was loaded.
 
@@ -514,7 +515,7 @@ class OnePhoton:
     def get_channels_for_hole(self, n_qn: int, hole_l: int | str) -> Channels:
         """
         Returns an instance of the Channels class for the given hole.
-        The instance contains all the relevant hole data.
+        The instance contains all the relevant simulation data.
 
         Args:
             n_qn - principal quantum number of the hole.

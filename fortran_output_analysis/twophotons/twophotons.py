@@ -7,7 +7,7 @@ from fortran_output_analysis.common_utility import (
     K_to_str,
 )
 from fortran_output_analysis.constants_and_parameters import g_eV_per_Hartree
-from fortran_output_analysis.types import (
+from fortran_output_analysis.custom_types import (
     ArrFloat64,
     ArrFloat64_2D,
     ArrFloat64_3D,
@@ -19,9 +19,6 @@ from fortran_output_analysis.common_utility import (
     Hole,
     assert_out_as,
     construct_hole_name,
-)
-
-from fortran_output_analysis.twophotons.utilities import (
     extract_data_from_verbose_file,
 )
 
@@ -285,11 +282,14 @@ class Channels:
         self, out_as: str = "str"
     ) -> dict[tuple[int | str, int], tuple[int, int]]:
         """
+        Maps final orbital momenta and the rank of the photon interaction K with the corresponding
+        indices in the data arrays.
+
         Args:
             out_as - whether to output orbital momenta in the form of int or str.
 
         Returns:
-            a dictionary mapping reachable orbital momenta l and ranks K with the indices in the
+            a dictionary mapping reachable orbital momenta l and ranks K to the indices in the
             data arrays. The structure of the dict is as follows:
                                             {
                                                (final_l_1, K_1): (row_idx_1, K_idx_1),
@@ -302,31 +302,25 @@ class Channels:
 
         l_K_to_indices = {}
 
-        final_l_reachable = final_ls(self.hole.l, only_reachable=True)
+        # get the list of all ionisation channels (paths)
+        ion_channel_list = self.get_all_ionisation_channels()
 
-        for final_l in final_l_reachable:
-            K_reachable = get_Ks(
-                self.hole.l, final_l, only_reachable=True, light_polar="lin"
+        for ion_channel in ion_channel_list:
+            l_key = ion_channel.l  # int
+            if out_as == "str":  # turn the angular momentum into the out_as format
+                l_key = l_to_str(l_key)
+            K = ion_channel.K
+            l_K_to_indices[(l_key, K)] = (
+                ion_channel.row_index,
+                ion_channel.K_index,
             )
-            for K in K_reachable:
-                ion_channel = self.get_ionisation_channel(final_l, K)
-
-                if out_as == "str":  # turn the angular momentum into the out_as format
-                    l_key = l_to_str(final_l)
-                else:
-                    l_key = final_l
-
-                l_K_to_indices[(l_key, K)] = (
-                    ion_channel.row_index,
-                    ion_channel.K_index,
-                )
 
         return l_K_to_indices
 
-    def get_omega_2ph(self) -> ArrFloat64:
+    def get_omega(self) -> ArrFloat64:
         """
         Returns:
-            an array of final energies (after 2 ph).
+            an array of total photon energies (after 2 ph) in Hartree.
         """
 
         return self._omega_2ph_data
@@ -405,10 +399,10 @@ class TwoPhotons:
 
     def is_hole_loaded(self, abs_or_emi: str, n_qn: int, hole_l: int | str) -> bool:
         """
-        Checks if the hole is loaded.
+        Checks if the hole is loaded in the given ionisation pathway.
 
         Args:
-            abs_or_emi - which path to check for: absroption or emission.
+            abs_or_emi - ionisation pathway: absorption or emission.
             n_qn - principal quantum number of the hole.
             hole_l - orbital angular momentum of the hole, in the int or str format.
 
@@ -441,8 +435,8 @@ class TwoPhotons:
         path_to_energies: str | None = None,
     ) -> None:
         """
-        Initializes a hole, corresponding ionisation channels, and loads simulation data for it.
-        The data is stored in an instance of the Channels class.
+        For the given ionisation pathway(s): initializes a hole and corresponding ionisation channels,
+        and loads the relevant simulation data. The data is stored in objects of the Channels class.
 
         Args:
             abs_emi_or_both - tells which pathway we load the data for: absorption, emission or both.
@@ -479,7 +473,7 @@ class TwoPhotons:
             bp_index - the breakpoint index, starting with 1.
             should_reload - in case the data was previously loaded, tells if it should be reloaded.
             binding_energy - binding energy for the hole. Allows specifying the predifined value for
-            the hole's binding energy instead of loading it from the simulation data.
+                             the hole's binding energy instead of loading it from the simulation data.
             path_to_energies - path to the energies.dat file with the binding energies.
         """
 
@@ -569,7 +563,7 @@ class TwoPhotons:
 
                 hole.load_binding_energy(path_to_energies)
 
-            # store the hole's information and load data for ionisation paths
+            # store the hole's information and load data for ionisation channels
             if abs_emi_or_both == "abs" or abs_emi_or_both == "both":
                 data_files_abs = data_files_for_path["abs"]
                 self._channels_abs[(n_qn, hole_l)] = Channels(
@@ -582,84 +576,108 @@ class TwoPhotons:
                     hole, data_files_emi, bp_index
                 )
 
-    def assert_hole_load(self, n_qn: int, hole_l: int | str):
+    def assert_hole_load(self, abs_or_emi: str, n_qn: int, hole_l: int | str) -> None:
         """
-        Asserts that the hole was loaded.
+        Asserts that the hole was loaded in the given ionisation pathway.
 
         Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
             n_qn - principal quantum number of the hole.
             hole_l - orbital angular momentum of the hole, in the int or str format.
         """
 
         assert self.is_hole_loaded(
-            n_qn, hole_l
-        ), f"The {construct_hole_name(self.atom_name, hole_l, n_qn)} hole is not loaded!"
+            abs_or_emi, n_qn, hole_l
+        ), f"The {construct_hole_name(self.atom_name, hole_l, n_qn)} hole is not loaded for the {abs_or_emi} pathway!"
 
-    def get_channels_for_hole(self, n_qn: int, hole_l: int | str) -> Channels:
+    def get_channels_for_hole(
+        self, abs_or_emi: str, n_qn: int, hole_l: int | str
+    ) -> Channels:
         """
-        Returns an instance of the Channels class for the given hole.
-        The instance contains all the relevant hole data.
+        Returns an instance of the Channels class for the given hole in the ionisation pathway.
+        The instance contains all the relevant simulation data.
 
         Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
             n_qn - principal quantum number of the hole.
             hole_l - orbital angular momentum of the hole, in the int or str format.
 
         Returns:
-            an instance of the Channels class for the given hole
+            an instance of the Channels class for the given hole and pathway.
         """
 
-        self.assert_hole_load(n_qn, hole_l)
+        self.assert_hole_load(abs_or_emi, n_qn, hole_l)
 
         if type(hole_l) is str:  # convert into int, if given in the str format
             hole_l = l_to_int(hole_l)
 
-        return self._channels[(n_qn, hole_l)]
+        if abs_or_emi == "abs":
+            return self._channels_abs[(n_qn, hole_l)]
 
-    def get_all_channels(self) -> list[Channels]:
-        """
-        Returns:
-            Channels instances for all loaded holes.
-        """
+        else:
+            return self._channels_emi[(n_qn, hole_l)]
 
-        return list(self._channels.values())
-
-    def get_loaded_hole(self, n_qn: int, hole_l: int | str) -> Hole:
+    def get_all_channels(self, abs_or_emi: str) -> list[Channels]:
         """
         Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
+
+        Returns:
+            Channels instances for all loaded holes in the given ionisation pathway.
+        """
+
+        assert_abs_or_emi(abs_or_emi)
+
+        if abs_or_emi == "abs":
+            return list(self._channels_abs.values())
+
+        else:
+            return list(self._channels_emi.values())
+
+    def get_loaded_hole(self, abs_or_emi: str, n_qn: int, hole_l: int | str) -> Hole:
+        """
+        Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
             n_qn - principal quantum number of the hole.
             hole_l - orbital angular momentum of the hole, in the int or str format.
 
         Returns:
-            a instance of the Hole class corresponding to the loaded hole.
+            an object of the Hole class corresponding to the loaded hole.
         """
 
-        channels = self.get_channels_for_hole(n_qn, hole_l)
+        channels = self.get_channels_for_hole(abs_or_emi, n_qn, hole_l)
 
         return channels.hole
 
-    def get_all_loaded_holes(self) -> list[Hole]:
+    def get_all_loaded_holes(self, abs_or_emi: str) -> list[Hole]:
         """
+        Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
+
         Returns:
-            a list of all loaded hole objects.
+            a list of all loaded hole objects in the given ionisation pathway.
         """
 
-        channels_list = self.get_all_channels()
+        channels_list = self.get_all_channels(abs_or_emi)
 
         return [channels.hole for channels in channels_list]
 
-    def get_channel_labels_for_hole(self, n_qn: int, hole_l: int | str) -> list[str]:
+    def get_channel_labels_for_hole(
+        self, abs_or_emi: str, n_qn: int, hole_l: int | str
+    ) -> list[str]:
         """
-        Constructs labels for all ionisation channels of the given hole.
+        Constructs labels for all ionisation channels of the given hole..
 
         Args:
+            abs_or_emi - ionisation pathway: absorption or emission.
             n_qn - principal quantum number of the hole.
             hole_l - orbital angular momentum of the hole, in the int or str format.
 
         Returns:
-            channel_labels - list with labels of all ionisation channels.
+            channel_labels - list with labels of the ionisation channels.
         """
 
-        channels = self.get_channels_for_hole(n_qn, hole_l)
+        channels = self.get_channels_for_hole(abs_or_emi, n_qn, hole_l)
         hole_name = channels.hole.name
         ionisation_channels = channels.get_all_ionisation_channels()
 

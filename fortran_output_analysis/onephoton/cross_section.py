@@ -4,7 +4,11 @@ from scipy.special import sph_harm_y
 from sympy.physics.wigner import wigner_3j
 
 from fortran_output_analysis.constants_and_parameters import fine_structure, au_to_Mbarn
-from fortran_output_analysis.types import ArrFloat64, ArrFloat64_2D, ArrComplex128_2D
+from fortran_output_analysis.custom_types import (
+    ArrFloat64,
+    ArrFloat64_2D,
+    ArrComplex128_2D,
+)
 from fortran_output_analysis.common_utility import l_to_int
 from fortran_output_analysis.common_utility import wavenumber
 from fortran_output_analysis.onephoton.onephoton import OnePhoton, final_ls

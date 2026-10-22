@@ -1,23 +1,20 @@
 import numpy as np
-from fortran_output_analysis.types import (
+from fortran_output_analysis.custom_types import (
     ArrFloat64,
     ArrFloat64_2D,
     ArrComplex128,
     ArrComplex128_2D,
 )
+from fortran_output_analysis.constants_and_parameters import g_eV_per_Hartree
 from fortran_output_analysis.common_utility import (
     l_to_int,
+    coulomb_phase,
+    final_sideband_energies_1sim,
+    match_matrix_elements_1sim,
     final_sideband_energies_2sim,
     match_matrix_elements_2sim,
 )
-from fortran_output_analysis.constants_and_parameters import g_eV_per_Hartree
 from fortran_output_analysis.onephoton.onephoton import OnePhoton, final_ls
-from fortran_output_analysis.common_utility import (
-    coulomb_phase,
-    extract_data_from_file,
-    final_sideband_energies_1sim,
-    match_matrix_elements_1sim,
-)
 
 """
 This namespace contains functions that may be required across different sections of one photon 
@@ -186,22 +183,21 @@ def get_coulomb_phase(
     if type(hole_l) is str:
         hole_l = l_to_int(hole_l)
 
-    all_final_ls = final_ls(hole_l, only_reachable=False)  # list of ALL final states
-    N_l = len(all_final_ls)
-
-    reachable_final_ls = final_ls(
-        hole_l, only_reachable=True
-    )  # list of reachable final states
+    N_l = len(
+        final_ls(hole_l, only_reachable=False)
+    )  # maximum number of reacahable orbital momenta (needed to keep the data dimensionality)
 
     # an array to store the coulomb phase
     coulomb_phase_arr = np.zeros((N_l, N_ekin), dtype=np.float64)
 
-    for i in range(N_l):
-        final_l = all_final_ls[i]
-        if (
-            final_l in reachable_final_ls
-        ):  # filter reachable states and keep unreachable ones zero
-            coulomb_phase_arr[i] = coulomb_phase(final_l, ekin, Z)
+    # get the reachable angular momenta (ionis. channels) and corresponding row indices
+    l_to_index = one_photon.get_channels_for_hole(n_qn, hole_l).get_l_to_index(
+        out_as="int"
+    )
+
+    for final_l in l_to_index:
+        idx = l_to_index[final_l]
+        coulomb_phase_arr[idx] = coulomb_phase(final_l, ekin, Z)
 
     return coulomb_phase_arr
 

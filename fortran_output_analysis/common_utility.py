@@ -1,14 +1,5 @@
-# ==================================================================================================
-# This file contains helper functions that are shared among several parts of the
-# atomicsystem-scripts.
-# Examples are kappa <-> l,j and wigner 3j-symbol functions
-# ==================================================================================================
 import numpy as np
-import os
-from sympy import N as sympy_to_num
-from sympy.physics.wigner import wigner_3j
 from scipy.special import gamma
-import glob
 import json
 from scipy.interpolate import InterpolatedUnivariateSpline as interp
 from fortran_output_analysis.constants_and_parameters import (
@@ -16,7 +7,7 @@ from fortran_output_analysis.constants_and_parameters import (
     fine_structure,
     g_eV_per_Hartree,
 )
-from fortran_output_analysis.types import ArrFloat64, ArrComplex128
+from fortran_output_analysis.custom_types import ArrFloat64, ArrComplex128
 
 
 def l_to_str(l: int) -> str:
@@ -125,8 +116,8 @@ class Hole:
             l - orbital angular momentum of the hole, given in the form of int or str.
             n_qn - pricnipal quantum number of the hole.
             binding_energy - binding energy for the hole in Hartree. Allows you to specify a
-            predifined alue for the hole's binding energy instead of loading it from the simulation
-            data.
+                             predifined alue for the hole's binding energy instead of loading it from
+                             the simulation data.
         """
         self.atom_name = atom_name
         if type(l) is str:
@@ -214,11 +205,75 @@ def assert_out_as(out_as: str) -> None:
     ), f'The out_as argument must be "int" or "str", not "{out_as}"!'
 
 
-# ==================================================================================================
-#
-# ==================================================================================================
 def load_raw_data(path):
     return np.loadtxt(path)
+
+
+def extract_data_from_verbose_file(file: str, bp_index: int) -> tuple[
+    ArrFloat64,
+    ArrComplex128,
+    ArrFloat64,
+]:
+    """
+    Extracts matrix elements, along with non-Coulomb phase shifts and final energies, from the
+    "verbose" type of output files. Such files contain more descriptive information about the
+    calculation process, including, for example, the values of the numerical and analytical parts
+    of the two-photon integration.
+
+    Args:
+        file - path to the file.
+        bp_index - the breakpoint index, starting with 1.
+
+    Returns:
+        en_final_arr - array of final energies.
+        mat_el_arr - array of matrix elements.
+        non_coul_phase_arr - array of non-Coulomb phase shifts.
+    """
+
+    en_final_arr = []
+    mat_el_arr = []
+    non_coul_phase_arr = []
+
+    # the file is read by sections. Each section starts with the " Photon energy" string.
+    # Once new section starts, the counter below is used to track the break points.
+    bp_counter = -1
+
+    with open(file, "r") as f:
+        for line in f:
+            # remove the unnecessary spaces/line endings in the beginning and the end of the string
+            line = line.strip()
+
+            if line.startswith("Photon energy"):  # new section
+                bp_counter = 0
+                en_final = np.float64(line.split()[6])
+                en_final_arr.append(en_final)
+
+            else:
+
+                if (
+                    bp_counter == -1
+                ):  # no section has been encountered yet, just continue reading
+                    continue
+
+                elif line.startswith("abs") or line.startswith("emi"):
+                    bp_counter += 1
+
+                if bp_counter == bp_index:  # if the desired breakpoint is hit
+                    data = line.split()
+
+                    mat_el_re = np.float64(data[7])
+                    mat_el_im = np.float64(data[8])
+                    mat_el = np.complex128(mat_el_re + 1j * mat_el_im)
+                    mat_el_arr.append(mat_el)
+
+                    non_coul_phase = np.float64(data[-1])
+                    non_coul_phase_arr.append(non_coul_phase)
+
+    en_final_arr = np.array(en_final_arr, dtype=np.float64)
+    mat_el_arr = np.array(mat_el_arr, dtype=np.complex128)
+    non_coul_phase_arr = np.array(non_coul_phase_arr, dtype=np.float64)
+
+    return en_final_arr, mat_el_arr, non_coul_phase_arr
 
 
 def phase(x):
@@ -319,23 +374,6 @@ def convert_amplitude_to_cross_section(amplitudes, k, omega, divide_omega=True):
     cross_section = convert_factor * (amplitudes**2) * k * omega_factor
 
     return cross_section
-
-
-def ground_state_energy(data_dir, kappa, n):
-    """Loads the ground state energy.
-    Arguments:
-        - data_dir : str
-            The fortran output directory.
-
-        - kappa    : int
-            The relativistic quantum number.
-
-        - n        : int
-            The principal quantum number.
-    """
-    hf_file = data_dir + "hf_wavefunctions/hf_energies_kappa_" + str(kappa) + ".dat"
-
-    return [float(l.split()[0]) for l in open(hf_file, "r").readlines()][n - 1]
 
 
 def wavenumber(ekin_hart: ArrFloat64) -> ArrFloat64:
@@ -552,7 +590,7 @@ def match_matrix_elements_2sim(
     Args:
         energies_final - final sideband energies.
         energies_emi - energies of the emission path.
-        energies_abs - energies of  the absorption path.
+        energies_abs - energies of the absorption path.
         mat_emi - unmatched matrix elements for the emission path.
         mat_abs - unmatched matrix elements for the absorption path.
         match_mode - the mode of the matrix element matching.
@@ -678,3 +716,9 @@ def extract_data_from_file(file: str, bp_index: int) -> tuple[ArrFloat64, ArrFlo
     assert bp_index < raw.shape[1], "the break point index is out of range!"
 
     return raw[:, 0], raw[:, bp_index]
+
+
+def assert_matrix_shapes(M_emi: np.ndarray, M_abs: np.ndarray) -> None:
+    assert (
+        M_emi.shape == M_abs.shape
+    ), "The shapes of the absorption and emission matrices are not the same!"
