@@ -151,7 +151,7 @@ analysis/
 plots/
 
 # folder with the shake-up notebooks
-shake_ups
+shakeups
 
 # folders with the papers, thesis etc
 master_thesis_results/
